@@ -120,6 +120,9 @@ export const requireOwnershipOrAdmin = (req, res, next) => {
   next();
 };
 
+// Alias for authenticateToken for consistency
+export const requireAuth = authenticateToken;
+
 // Optional authentication middleware (doesn't fail if no token)
 export const optionalAuth = async (req, res, next) => {
   try {

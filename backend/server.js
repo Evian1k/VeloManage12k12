@@ -11,6 +11,8 @@ import mongoose from 'mongoose';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import serviceRoutes from './routes/services.js';
+import vehicleRoutes from './routes/vehicles.js';
+import incidentRoutes from './routes/incidents.js';
 import truckRoutes from './routes/trucks.js';
 import messageRoutes from './routes/messages.js';
 import pickupRoutes from './routes/pickups.js';
@@ -75,6 +77,8 @@ const apiVersion = process.env.API_VERSION || 'v1';
 app.use(`/api/${apiVersion}/auth`, authRoutes);
 app.use(`/api/${apiVersion}/users`, authenticateToken, userRoutes);
 app.use(`/api/${apiVersion}/services`, authenticateToken, serviceRoutes);
+app.use(`/api/${apiVersion}/vehicles`, authenticateToken, vehicleRoutes);
+app.use(`/api/${apiVersion}/incidents`, authenticateToken, incidentRoutes);
 app.use(`/api/${apiVersion}/trucks`, authenticateToken, truckRoutes);
 app.use(`/api/${apiVersion}/messages`, authenticateToken, messageRoutes);
 app.use(`/api/${apiVersion}/pickups`, authenticateToken, pickupRoutes);
@@ -103,6 +107,8 @@ app.get('/', (req, res) => {
       auth: `/api/${apiVersion}/auth`,
       users: `/api/${apiVersion}/users`,
       services: `/api/${apiVersion}/services`,
+      vehicles: `/api/${apiVersion}/vehicles`,
+      incidents: `/api/${apiVersion}/incidents`,
       trucks: `/api/${apiVersion}/trucks`,
       messages: `/api/${apiVersion}/messages`,
       pickups: `/api/${apiVersion}/pickups`,
