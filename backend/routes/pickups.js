@@ -1,31 +1,11 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
 import mongoose from 'mongoose';
+import PickupRequest from '../models/PickupRequest.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { io } from '../server.js';
 
 const router = express.Router();
-
-// Simple pickup request schema (you can enhance this or create a proper model)
-const PickupRequest = mongoose.model('PickupRequest', new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  userName: { type: String, required: true },
-  userPhone: String,
-  pickupLocation: {
-    latitude: { type: Number, required: true },
-    longitude: { type: Number, required: true },
-    address: String
-  },
-  status: {
-    type: String,
-    enum: ['pending', 'dispatched', 'en-route', 'at-location', 'completed', 'cancelled'],
-    default: 'pending'
-  },
-  assignedTruck: { type: mongoose.Schema.Types.ObjectId, ref: 'Truck' },
-  requestTime: { type: Date, default: Date.now },
-  dispatchTime: Date,
-  completionTime: Date,
-  notes: String
-}, { timestamps: true }));
 
 // @route   GET /api/v1/pickups
 // @desc    Get pickup requests
