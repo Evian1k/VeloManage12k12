@@ -9,7 +9,8 @@ import RequestList from '@/components/admin/RequestList';
 import StatusUpdateDialog from '@/components/admin/StatusUpdateDialog';
 import AdminMessages from '@/components/admin/AdminMessages';
 import TruckDispatch from '@/components/admin/TruckDispatch';
-import { Wrench, MessageSquare, Truck } from 'lucide-react';
+import BranchManagement from '@/components/admin/BranchManagement';
+import { Wrench, MessageSquare, Truck, Building } from 'lucide-react';
 
 const AdminDashboard = () => {
   const { requests, updateRequestStatus } = useService();
@@ -50,12 +51,15 @@ const AdminDashboard = () => {
         transition={{ duration: 0.6, delay: 0.2 }}
       >
         <Tabs defaultValue="requests" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 bg-black/50 border border-red-900/30">
+          <TabsList className="grid w-full grid-cols-4 bg-black/50 border border-red-900/30">
             <TabsTrigger value="requests" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">
               <Wrench className="w-4 h-4 mr-2" /> Service Requests
             </TabsTrigger>
             <TabsTrigger value="trucks" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">
               <Truck className="w-4 h-4 mr-2" /> Truck Dispatch
+            </TabsTrigger>
+            <TabsTrigger value="branches" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">
+              <Building className="w-4 h-4 mr-2" /> Branches
             </TabsTrigger>
             <TabsTrigger value="messages" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">
               <MessageSquare className="w-4 h-4 mr-2" /> Messages
@@ -87,6 +91,10 @@ const AdminDashboard = () => {
 
           <TabsContent value="trucks">
             <TruckDispatch />
+          </TabsContent>
+
+          <TabsContent value="branches">
+            <BranchManagement />
           </TabsContent>
 
           <TabsContent value="messages">

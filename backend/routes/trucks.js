@@ -11,14 +11,16 @@ const router = express.Router();
 // @access  Private
 router.get('/', async (req, res) => {
   try {
-    const { status, isActive } = req.query;
+    const { status, isActive, branchId } = req.query;
     const filter = {};
     
     if (status) filter.status = status;
     if (isActive !== undefined) filter.isActive = isActive === 'true';
+    if (branchId) filter.assignedBranch = branchId;
 
     const trucks = await Truck.find(filter)
       .populate('assignedRequest', 'pickupLocation status userName')
+      .populate('assignedBranch', 'name code location.address')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -32,6 +34,34 @@ router.get('/', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error retrieving trucks'
+    });
+  }
+});
+
+// @route   GET /api/v1/trucks/branch/:branchId
+// @desc    Get trucks by branch
+// @access  Private
+router.get('/branch/:branchId', async (req, res) => {
+  try {
+    const trucks = await Truck.find({ 
+      assignedBranch: req.params.branchId,
+      isActive: true 
+    })
+      .populate('assignedRequest', 'pickupLocation status userName')
+      .populate('assignedBranch', 'name code location.address')
+      .sort({ status: 1, createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: trucks,
+      count: trucks.length
+    });
+
+  } catch (error) {
+    console.error('Get trucks by branch error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error retrieving trucks for branch'
     });
   }
 });
@@ -73,6 +103,7 @@ router.post('/', requireAdmin, uploadTruckDocuments, handleUploadError, [
   body('driver.name').trim().notEmpty().withMessage('Driver name is required'),
   body('driver.phone').trim().notEmpty().withMessage('Driver phone is required'),
   body('vehicle.licensePlate').trim().notEmpty().withMessage('License plate is required'),
+  body('assignedBranch').isMongoId().withMessage('Valid branch ID is required'),
   body('currentLocation.latitude').isFloat({ min: -90, max: 90 }).withMessage('Valid latitude required'),
   body('currentLocation.longitude').isFloat({ min: -180, max: 180 }).withMessage('Valid longitude required')
 ], async (req, res) => {
@@ -444,6 +475,76 @@ router.delete('/:id/documents/:docId', requireAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error deleting document'
+    });
+  }
+});
+
+// @route   PUT /api/v1/trucks/:id/assign-branch
+// @desc    Assign truck to branch
+// @access  Admin only
+router.put('/:id/assign-branch', requireAdmin, [
+  body('branchId').isMongoId().withMessage('Valid branch ID is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { branchId } = req.body;
+    const truck = await Truck.findById(req.params.id);
+
+    if (!truck) {
+      return res.status(404).json({
+        success: false,
+        message: 'Truck not found'
+      });
+    }
+
+    truck.assignedBranch = branchId;
+    await truck.save();
+
+    await truck.populate('assignedBranch', 'name code location.address');
+
+    res.json({
+      success: true,
+      message: 'Truck assigned to branch successfully',
+      data: truck
+    });
+
+  } catch (error) {
+    console.error('Assign truck to branch error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error assigning truck to branch'
+    });
+  }
+});
+
+// @route   GET /api/v1/trucks/map-data
+// @desc    Get truck data for map display
+// @access  Private
+router.get('/map-data', async (req, res) => {
+  try {
+    const trucks = await Truck.find({ isActive: true })
+      .populate('assignedBranch', 'name code location')
+      .populate('assignedRequest', 'pickupLocation status userName')
+      .select('truckId driver vehicle status currentLocation lastSeen assignedBranch assignedRequest')
+      .sort({ lastSeen: -1 });
+
+    res.json({
+      success: true,
+      data: trucks
+    });
+
+  } catch (error) {
+    console.error('Get map data error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error retrieving map data'
     });
   }
 });

@@ -89,6 +89,11 @@ const truckSchema = new mongoose.Schema({
   locationHistory: [{
     type: locationSchema
   }],
+  assignedBranch: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Branch',
+    required: true
+  },
   assignedRequest: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'PickupRequest',

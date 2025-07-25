@@ -288,6 +288,52 @@ class ApiService {
     });
   }
 
+  // Branch management endpoints
+  async getBranches() {
+    return this.request('/branches');
+  }
+
+  async getBranch(id) {
+    return this.request(`/branches/${id}`);
+  }
+
+  async createBranch(branchData) {
+    return this.request('/branches', {
+      method: 'POST',
+      body: JSON.stringify(branchData),
+    });
+  }
+
+  async updateBranch(id, branchData) {
+    return this.request(`/branches/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(branchData),
+    });
+  }
+
+  async deleteBranch(id) {
+    return this.request(`/branches/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Enhanced truck management
+  async getTrucksByBranch(branchId) {
+    return this.request(`/trucks/branch/${branchId}`);
+  }
+
+  async assignTruckToBranch(truckId, branchId) {
+    return this.request(`/trucks/${truckId}/assign-branch`, {
+      method: 'PUT',
+      body: JSON.stringify({ branchId }),
+    });
+  }
+
+  // Pickup requests alias
+  async getPickupRequests() {
+    return this.getPickups();
+  }
+
   // File upload helper
   async uploadFile(endpoint, file, additionalData = {}) {
     const formData = new FormData();
