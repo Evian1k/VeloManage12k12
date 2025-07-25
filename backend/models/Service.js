@@ -78,19 +78,6 @@ const serviceSchema = new mongoose.Schema({
     estimatedDuration: { type: Number, default: 2 }, // hours
     actualDuration: Number
   },
-  location: {
-    type: {
-      type: String,
-      enum: ['Point'],
-      default: 'Point'
-    },
-    coordinates: {
-      type: [Number], // [longitude, latitude]
-      index: '2dsphere'
-    },
-    address: String,
-    isPickupLocation: { type: Boolean, default: false }
-  },
   spareParts: [{
     name: String,
     quantity: Number,
@@ -185,7 +172,6 @@ serviceSchema.index({ customer: 1 });
 serviceSchema.index({ serviceType: 1 });
 serviceSchema.index({ status: 1 });
 serviceSchema.index({ 'schedule.scheduledDate': 1 });
-serviceSchema.index({ location: '2dsphere' });
 serviceSchema.index({ createdAt: -1 });
 
 // Generate service number

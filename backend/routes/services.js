@@ -1,7 +1,9 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import Service from '../models/Service.js';
+import Notification from '../models/Notification.js';
+import { authenticateToken, requireAdmin, requireRole } from '../middleware/auth.js';
+import { io } from '../server.js';
 import User from '../models/User.js';
 import Truck from '../models/Truck.js';
 import Branch from '../models/Branch.js';
@@ -96,7 +98,7 @@ router.post('/', [
   body('vehicle.model').notEmpty().withMessage('Vehicle model is required'),
   body('vehicle.year').notEmpty().withMessage('Vehicle year is required'),
   body('vehicle.licensePlate').notEmpty().withMessage('License plate is required'),
-  body('description').notEmpty().withMessage('Service description is required')
+  body('description').optional().trim().isLength({ max: 500 }).withMessage('Description too long')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -111,13 +113,10 @@ router.post('/', [
     const {
       serviceType,
       vehicle,
-      description,
+      description = 'Service request',
       urgency = 'normal',
       preferredDate,
-      location,
-      spareParts = [],
-      isRecurring = false,
-      recurringConfig
+      spareParts = []
     } = req.body;
 
     // Determine service category
@@ -136,46 +135,6 @@ router.post('/', [
       emergency_service: 'emergency'
     };
 
-    // Create service steps based on type
-    const getServiceSteps = (type) => {
-      const stepTemplates = {
-        brake_repair: [
-          { name: 'Initial Inspection', description: 'Inspect brake system components' },
-          { name: 'Remove Old Parts', description: 'Remove worn brake pads/discs' },
-          { name: 'Install New Parts', description: 'Install new brake components' },
-          { name: 'System Testing', description: 'Test brake system functionality' },
-          { name: 'Quality Check', description: 'Final inspection and road test' }
-        ],
-        oil_change: [
-          { name: 'Drain Old Oil', description: 'Drain existing engine oil' },
-          { name: 'Replace Filter', description: 'Install new oil filter' },
-          { name: 'Add New Oil', description: 'Add fresh engine oil' },
-          { name: 'System Check', description: 'Check oil levels and leaks' }
-        ],
-        routine_3000km: [
-          { name: 'Initial Inspection', description: 'Comprehensive vehicle inspection' },
-          { name: 'Oil Change', description: 'Change engine oil and filter' },
-          { name: 'Filter Replacement', description: 'Replace air and fuel filters' },
-          { name: 'Fluid Check', description: 'Check and top up all fluids' },
-          { name: 'Safety Check', description: 'Inspect brakes, tires, and lights' },
-          { name: 'Final Testing', description: 'Road test and quality assurance' }
-        ],
-        engine_diagnostic: [
-          { name: 'Connect Diagnostic Tools', description: 'Connect OBD scanner' },
-          { name: 'Read Error Codes', description: 'Retrieve diagnostic trouble codes' },
-          { name: 'System Analysis', description: 'Analyze engine performance data' },
-          { name: 'Component Testing', description: 'Test specific engine components' },
-          { name: 'Report Generation', description: 'Generate diagnostic report' }
-        ]
-      };
-      
-      return stepTemplates[type] || [
-        { name: 'Service Preparation', description: 'Prepare for service' },
-        { name: 'Service Execution', description: 'Perform requested service' },
-        { name: 'Quality Check', description: 'Final inspection' }
-      ];
-    };
-
     const service = new Service({
       serviceNumber: `SRV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       customer: req.user.id,
@@ -184,29 +143,15 @@ router.post('/', [
       vehicle,
       description,
       urgency,
-      schedule: {
-        preferredDate: preferredDate ? new Date(preferredDate) : null,
-        estimatedDuration: getServiceEstimatedDuration(serviceType)
-      },
-      location: location ? {
-        coordinates: [location.longitude, location.latitude],
-        address: location.address,
-        isPickupLocation: serviceType === 'vehicle_pickup'
-      } : undefined,
+      preferredDate: preferredDate ? new Date(preferredDate) : null,
       spareParts: spareParts.map(part => ({
-        ...part,
-        totalPrice: part.quantity * part.unitPrice
+        name: part.name,
+        quantity: part.quantity || 1,
+        unitPrice: part.unitPrice || 0,
+        totalPrice: (part.quantity || 1) * (part.unitPrice || 0)
       })),
-      progress: {
-        steps: getServiceSteps(serviceType),
-        completionPercentage: 0
-      },
-      isRecurring,
-      recurringConfig: isRecurring ? recurringConfig : undefined
+      totalCost: spareParts.reduce((total, part) => total + ((part.quantity || 1) * (part.unitPrice || 0)), 0)
     });
-
-    // Calculate totals
-    service.calculateTotals();
     
     await service.save();
 
@@ -218,11 +163,13 @@ router.post('/', [
       message: 'Service request created successfully',
       data: service
     });
+
   } catch (error) {
-    console.error('Error creating service:', error);
+    console.error('Service creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error creating service request'
+      message: 'Error creating service request',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

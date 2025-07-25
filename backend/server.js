@@ -18,6 +18,7 @@ import branchRoutes from './routes/branches.js';
 import bookingRoutes from './routes/bookings.js';
 import analyticsRoutes from './routes/analytics.js';
 import dashboardRoutes from './routes/dashboard.js';
+import notificationRoutes from './routes/notifications.js';
 
 // Import middleware
 import { authenticateToken } from './middleware/auth.js';
@@ -82,6 +83,7 @@ app.use(`/api/${apiVersion}/branches`, authenticateToken, branchRoutes);
 app.use(`/api/${apiVersion}/bookings`, authenticateToken, bookingRoutes);
 app.use(`/api/${apiVersion}/analytics`, authenticateToken, analyticsRoutes);
 app.use(`/api/${apiVersion}/dashboard`, authenticateToken, dashboardRoutes);
+app.use(`/api/${apiVersion}/notifications`, authenticateToken, notificationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -109,7 +111,8 @@ app.get('/', (req, res) => {
       branches: `/api/${apiVersion}/branches`,
       bookings: `/api/${apiVersion}/bookings`,
       analytics: `/api/${apiVersion}/analytics`,
-      dashboard: `/api/${apiVersion}/dashboard`
+      dashboard: `/api/${apiVersion}/dashboard`,
+      notifications: `/api/${apiVersion}/notifications`
     }
   });
 });
