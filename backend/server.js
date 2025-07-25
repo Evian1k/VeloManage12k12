@@ -74,7 +74,7 @@ app.use('/uploads', express.static('uploads'));
 const apiVersion = process.env.API_VERSION || 'v1';
 app.use(`/api/${apiVersion}/auth`, authRoutes);
 app.use(`/api/${apiVersion}/users`, authenticateToken, userRoutes);
-app.use(`/api/${apiVersion}/services`, authenticateToken, serviceRoutes);
+app.use(`/api/${apiVersion}/services`, serviceRoutes);
 app.use(`/api/${apiVersion}/trucks`, authenticateToken, truckRoutes);
 app.use(`/api/${apiVersion}/messages`, authenticateToken, messageRoutes);
 app.use(`/api/${apiVersion}/pickups`, authenticateToken, pickupRoutes);
