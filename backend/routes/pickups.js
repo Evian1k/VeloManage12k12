@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import mongoose from 'mongoose';
 import PickupRequest from '../models/PickupRequest.js';
 import { requireAdmin } from '../middleware/auth.js';
-import { io } from '../server.js';
+import { getIO } from '../utils/socket.js';
 
 const router = express.Router();
 
@@ -85,7 +85,7 @@ router.post('/', [
     await pickupRequest.save();
 
     // Emit real-time notification to admins
-    const io = req.app.get('socketio');
+    const io = getIO();
     io.to('admin-room').emit('pickup-request-received', {
       requestId: pickupRequest._id,
       userName: req.user.name,
@@ -147,7 +147,7 @@ router.put('/:id/status', requireAdmin, [
     }
 
     // Emit real-time update to user
-    const io = req.app.get('socketio');
+    const io = getIO();
     io.to(`user-${pickupRequest.userId._id}`).emit('pickup-status-updated', {
       requestId: pickupRequest._id,
       status: pickupRequest.status,
@@ -203,7 +203,7 @@ router.put('/:id/assign-truck', requireAdmin, [
     }
 
     // Emit real-time updates
-    const io = req.app.get('socketio');
+    const io = getIO();
     
     // Notify user
     io.to(`user-${pickupRequest.userId._id}`).emit('truck-dispatch-update', {

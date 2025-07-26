@@ -2,7 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import Notification from '../models/Notification.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
-import { io } from '../server.js';
+import { getIO } from '../utils/socket.js';
 import mongoose from 'mongoose';
 
 const router = express.Router();
@@ -245,7 +245,7 @@ router.post('/broadcast', requireRole(['admin']), [
 
     // Send real-time notifications
     users.forEach(user => {
-      io.to(user._id.toString()).emit('notification', {
+      getIO().to(user._id.toString()).emit('notification', {
         title,
         message,
         type,
