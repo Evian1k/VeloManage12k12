@@ -33,7 +33,10 @@ export const authenticateToken = async (req, res, next) => {
     next();
 
   } catch (error) {
-    console.error('Authentication error:', error);
+    // Log error only in development
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Authentication error:', error.message);
+    }
     
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({

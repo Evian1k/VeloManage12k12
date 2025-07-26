@@ -387,12 +387,42 @@ router.get('/verify', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Token verification error:', error);
+    // Log error only in development
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Token verification error:', error.message);
+    }
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token'
+      });
+    }
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token expired'
+      });
+    }
+    
     res.status(401).json({
       success: false,
-      message: 'Invalid token'
+      message: 'Token verification failed'
     });
   }
+});
+
+// @route   POST /api/v1/auth/logout
+// @desc    Logout user (client-side token removal)
+// @access  Public
+router.post('/logout', (req, res) => {
+  // Since JWT is stateless, logout is handled client-side
+  // This endpoint just confirms the logout action
+  res.json({
+    success: true,
+    message: 'Logged out successfully'
+  });
 });
 
 export default router;
