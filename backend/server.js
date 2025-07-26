@@ -4,8 +4,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
-import { Server } from 'socket.io';
 import mongoose from 'mongoose';
+import { initializeSocket } from './utils/socket.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -18,6 +18,7 @@ import branchRoutes from './routes/branches.js';
 import bookingRoutes from './routes/bookings.js';
 import analyticsRoutes from './routes/analytics.js';
 import dashboardRoutes from './routes/dashboard.js';
+import notificationRoutes from './routes/notifications.js';
 
 // Import middleware
 import { authenticateToken } from './middleware/auth.js';
@@ -29,13 +30,8 @@ dotenv.config();
 const app = express();
 const server = createServer(app);
 
-// Socket.io setup for real-time features
-const io = new Server(server, {
-  cors: {
-    origin: process.env.SOCKET_CORS_ORIGIN || "http://localhost:5173",
-    methods: ["GET", "POST"]
-  }
-});
+// Initialize Socket.IO
+const io = initializeSocket(server);
 
 // Database connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/autocare-pro')
@@ -74,7 +70,7 @@ app.use('/uploads', express.static('uploads'));
 const apiVersion = process.env.API_VERSION || 'v1';
 app.use(`/api/${apiVersion}/auth`, authRoutes);
 app.use(`/api/${apiVersion}/users`, authenticateToken, userRoutes);
-app.use(`/api/${apiVersion}/services`, authenticateToken, serviceRoutes);
+app.use(`/api/${apiVersion}/services`, serviceRoutes);
 app.use(`/api/${apiVersion}/trucks`, authenticateToken, truckRoutes);
 app.use(`/api/${apiVersion}/messages`, authenticateToken, messageRoutes);
 app.use(`/api/${apiVersion}/pickups`, authenticateToken, pickupRoutes);
@@ -82,6 +78,7 @@ app.use(`/api/${apiVersion}/branches`, authenticateToken, branchRoutes);
 app.use(`/api/${apiVersion}/bookings`, authenticateToken, bookingRoutes);
 app.use(`/api/${apiVersion}/analytics`, authenticateToken, analyticsRoutes);
 app.use(`/api/${apiVersion}/dashboard`, authenticateToken, dashboardRoutes);
+app.use(`/api/${apiVersion}/notifications`, authenticateToken, notificationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -109,58 +106,9 @@ app.get('/', (req, res) => {
       branches: `/api/${apiVersion}/branches`,
       bookings: `/api/${apiVersion}/bookings`,
       analytics: `/api/${apiVersion}/analytics`,
-      dashboard: `/api/${apiVersion}/dashboard`
+      dashboard: `/api/${apiVersion}/dashboard`,
+      notifications: `/api/${apiVersion}/notifications`
     }
-  });
-});
-
-// Socket.io connection handling
-io.on('connection', (socket) => {
-  console.log('👤 User connected:', socket.id);
-
-  // Join user to their room for personal notifications
-  socket.on('join-user-room', (userId) => {
-    socket.join(`user-${userId}`);
-    console.log(`👤 User ${userId} joined their room`);
-  });
-
-  // Join admin to admin room
-  socket.on('join-admin-room', () => {
-    socket.join('admin-room');
-    console.log('👨‍💼 Admin joined admin room');
-  });
-
-  // Handle truck location updates
-  socket.on('truck-location-update', (data) => {
-    // Broadcast to all connected clients
-    socket.broadcast.emit('truck-location-updated', data);
-  });
-
-  // Handle new messages
-  socket.on('new-message', (data) => {
-    if (data.recipientType === 'admin') {
-      // Send to admin room
-      socket.to('admin-room').emit('message-received', data);
-    } else {
-      // Send to specific user
-      socket.to(`user-${data.recipientId}`).emit('message-received', data);
-    }
-  });
-
-  // Handle pickup requests
-  socket.on('new-pickup-request', (data) => {
-    // Notify all admins
-    socket.to('admin-room').emit('pickup-request-received', data);
-  });
-
-  // Handle truck dispatch
-  socket.on('truck-dispatched', (data) => {
-    // Notify the specific user
-    socket.to(`user-${data.userId}`).emit('truck-dispatch-update', data);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('👤 User disconnected:', socket.id);
   });
 });
 

@@ -1,470 +1,785 @@
 import express from 'express';
 import mongoose from 'mongoose';
+import { authenticateToken, requireRole } from '../middleware/auth.js';
+import Service from '../models/Service.js';
 import User from '../models/User.js';
 import Truck from '../models/Truck.js';
 import Branch from '../models/Branch.js';
-import Booking from '../models/Booking.js';
-import Message from '../models/Message.js';
-import { requireAdmin } from '../middleware/auth.js';
+import PickupRequest from '../models/PickupRequest.js';
 
 const router = express.Router();
 
+// All routes require authentication
+router.use(authenticateToken);
+
 // @route   GET /api/v1/analytics/dashboard
 // @desc    Get dashboard analytics
-// @access  Admin only
-router.get('/dashboard', requireAdmin, async (req, res) => {
+// @access  Private (Admin/Manager)
+router.get('/dashboard', requireRole(['admin', 'manager']), async (req, res) => {
   try {
-    const { period = '30' } = req.query; // days
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(period));
+    const { period = '30d', branchId } = req.query;
+    
+    // Calculate date range
+    const now = new Date();
+    let startDate;
+    
+    switch (period) {
+      case '24h':
+        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        break;
+      case '7d':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30d':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case '90d':
+        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
 
-    // Get basic counts
+    // Build filter for branch-specific data
+    const serviceFilter = { createdAt: { $gte: startDate } };
+    const pickupFilter = { createdAt: { $gte: startDate } };
+    
+    if (branchId) {
+      serviceFilter.branch = branchId;
+      pickupFilter.branch = branchId;
+    }
+
+    // Get analytics data in parallel
     const [
-      totalUsers,
-      totalTrucks,
-      totalBranches,
-      activeBookings,
-      completedBookings,
-      totalRevenue
+      totalServices,
+      servicesByStatus,
+      servicesByType,
+      servicesByPriority,
+      averageCompletionTime,
+      totalRevenue,
+      customerSatisfaction,
+      truckUtilization,
+      activeCustomers,
+      pendingPickups,
+      completedPickups,
+      dailyServiceTrends,
+      topServices,
+      branchPerformance,
+      technicianPerformance,
+      customerRetention
     ] = await Promise.all([
-      User.countDocuments({ isAdmin: false }),
-      Truck.countDocuments({ isActive: true }),
-      Branch.countDocuments({ isActive: true }),
-      Booking.countDocuments({ 
-        status: { $in: ['pending', 'confirmed', 'assigned', 'in_progress'] }
-      }),
-      Booking.countDocuments({ 
-        status: 'completed',
-        createdAt: { $gte: startDate }
-      }),
-      Booking.aggregate([
+      // Total services
+      Service.countDocuments(serviceFilter),
+      
+      // Services by status
+      Service.aggregate([
+        { $match: serviceFilter },
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]),
+      
+      // Services by type
+      Service.aggregate([
+        { $match: serviceFilter },
+        { $group: { _id: '$serviceType', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 }
+      ]),
+      
+      // Services by priority
+      Service.aggregate([
+        { $match: serviceFilter },
+        { $group: { _id: '$urgency', count: { $sum: 1 } } }
+      ]),
+      
+      // Average completion time
+      Service.aggregate([
+        { $match: { ...serviceFilter, status: 'completed', 'schedule.endTime': { $exists: true } } },
         {
-          $match: {
-            status: 'completed',
-            createdAt: { $gte: startDate }
+          $addFields: {
+            completionTime: {
+              $subtract: ['$schedule.endTime', '$schedule.startTime']
+            }
           }
         },
         {
           $group: {
             _id: null,
-            total: { $sum: '$pricing.totalAmount' }
+            avgTime: { $avg: '$completionTime' }
+          }
+        }
+      ]),
+      
+      // Total revenue
+      Service.aggregate([
+        { $match: { ...serviceFilter, status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$totalCost' } } }
+      ]),
+      
+      // Customer satisfaction (from feedback ratings)
+      Service.aggregate([
+        { 
+          $match: { 
+            ...serviceFilter, 
+            'feedback.rating': { $exists: true, $ne: null } 
+          } 
+        },
+        {
+          $group: {
+            _id: null,
+            avgRating: { $avg: '$feedback.rating' },
+            totalRatings: { $sum: 1 }
+          }
+        }
+      ]),
+      
+      // Truck utilization
+      Truck.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 }
+          }
+        }
+      ]),
+      
+      // Active customers
+      Service.aggregate([
+        { $match: serviceFilter },
+        { $group: { _id: '$customer' } },
+        { $count: 'activeCustomers' }
+      ]),
+      
+      // Pending pickups
+      PickupRequest.countDocuments({ ...pickupFilter, status: 'pending' }),
+      
+      // Completed pickups
+      PickupRequest.countDocuments({ ...pickupFilter, status: 'completed' }),
+      
+      // Daily service trends
+      Service.aggregate([
+        { $match: serviceFilter },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$createdAt'
+              }
+            },
+            services: { $sum: 1 },
+            revenue: { $sum: '$totalCost' }
+          }
+        },
+        { $sort: { '_id': 1 } }
+      ]),
+      
+      // Top services
+      Service.aggregate([
+        { $match: serviceFilter },
+        {
+          $group: {
+            _id: '$serviceType',
+            count: { $sum: 1 },
+            revenue: { $sum: '$totalCost' },
+            avgRating: { $avg: '$feedback.rating' }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 5 }
+      ]),
+      
+      // Branch performance (if not filtering by specific branch)
+      !branchId ? Service.aggregate([
+        { $match: serviceFilter },
+        {
+          $lookup: {
+            from: 'branches',
+            localField: 'branch',
+            foreignField: '_id',
+            as: 'branchInfo'
+          }
+        },
+        { $unwind: { path: '$branchInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $group: {
+            _id: '$branch',
+            branchName: { $first: '$branchInfo.name' },
+            services: { $sum: 1 },
+            revenue: { $sum: '$totalCost' },
+            avgRating: { $avg: '$feedback.rating' }
+          }
+        },
+        { $sort: { services: -1 } }
+      ]) : Promise.resolve([]),
+      
+      // Technician performance
+      Service.aggregate([
+        { $match: { ...serviceFilter, assignedTechnician: { $exists: true } } },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'assignedTechnician',
+            foreignField: '_id',
+            as: 'techInfo'
+          }
+        },
+        { $unwind: '$techInfo' },
+        {
+          $group: {
+            _id: '$assignedTechnician',
+            techName: { $first: '$techInfo.name' },
+            services: { $sum: 1 },
+            completed: {
+              $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+            },
+            avgRating: { $avg: '$feedback.rating' }
+          }
+        },
+        {
+          $addFields: {
+            completionRate: {
+              $multiply: [
+                { $divide: ['$completed', '$services'] },
+                100
+              ]
+            }
+          }
+        },
+        { $sort: { services: -1 } },
+        { $limit: 10 }
+      ]),
+      
+      // Customer retention rate
+      Service.aggregate([
+        { $match: serviceFilter },
+        {
+          $group: {
+            _id: '$customer',
+            serviceCount: { $sum: 1 },
+            firstService: { $min: '$createdAt' },
+            lastService: { $max: '$createdAt' }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalCustomers: { $sum: 1 },
+            returningCustomers: {
+              $sum: { $cond: [{ $gt: ['$serviceCount', 1] }, 1, 0] }
+            }
+          }
+        },
+        {
+          $addFields: {
+            retentionRate: {
+              $multiply: [
+                { $divide: ['$returningCustomers', '$totalCustomers'] },
+                100
+              ]
+            }
           }
         }
       ])
     ]);
 
-    // Truck status distribution
-    const truckStatusData = await Truck.aggregate([
-      { $match: { isActive: true } },
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
+    // Calculate key metrics
+    const completedServices = servicesByStatus.find(s => s._id === 'completed')?.count || 0;
+    const completionRate = totalServices > 0 ? (completedServices / totalServices) * 100 : 0;
+    
+    const avgCompletionHours = averageCompletionTime[0]?.avgTime 
+      ? Math.round(averageCompletionTime[0].avgTime / (1000 * 60 * 60 * 24)) 
+      : 0;
 
-    // Booking trends (last 7 days)
-    const bookingTrends = await Booking.aggregate([
-      {
-        $match: {
-          createdAt: { 
-            $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) 
-          }
-        }
-      },
-      {
-        $group: {
-          _id: {
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }
-          },
-          bookings: { $sum: 1 },
-          revenue: { $sum: '$pricing.totalAmount' }
-        }
-      },
-      { $sort: { '_id.date': 1 } }
-    ]);
-
-    // Service type distribution
-    const serviceTypeData = await Booking.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: '$serviceType',
-          count: { $sum: 1 },
-          revenue: { $sum: '$pricing.totalAmount' }
-        }
-      }
-    ]);
-
-    // Top performing branches
-    const branchPerformance = await Branch.aggregate([
-      {
-        $lookup: {
-          from: 'trucks',
-          localField: 'assignedTrucks',
-          foreignField: '_id',
-          as: 'trucks'
-        }
-      },
-      {
-        $lookup: {
-          from: 'bookings',
-          let: { branchId: '$_id' },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ['$branch', '$$branchId'] },
-                createdAt: { $gte: startDate }
-              }
-            }
-          ],
-          as: 'bookings'
-        }
-      },
-      {
-        $project: {
-          name: 1,
-          code: 1,
-          truckCount: { $size: '$trucks' },
-          bookingCount: { $size: '$bookings' },
-          revenue: {
-            $sum: '$bookings.pricing.totalAmount'
-          }
-        }
-      },
-      { $sort: { revenue: -1 } },
-      { $limit: 10 }
-    ]);
-
-    // Fleet utilization
-    const fleetUtilization = await Truck.aggregate([
-      {
-        $group: {
-          _id: null,
-          total: { $sum: 1 },
-          available: {
-            $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] }
-          },
-          dispatched: {
-            $sum: { $cond: [{ $eq: ['$status', 'dispatched'] }, 1, 0] }
-          },
-          maintenance: {
-            $sum: { $cond: [{ $eq: ['$status', 'maintenance'] }, 1, 0] }
-          }
-        }
-      }
-    ]);
-
-    // Average ratings
-    const ratingStats = await Booking.aggregate([
-      {
-        $match: {
-          'rating.customerRating.score': { $exists: true }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          avgCustomerRating: { $avg: '$rating.customerRating.score' },
-          avgDriverRating: { $avg: '$rating.driverRating.score' },
-          totalRatings: { $sum: 1 }
-        }
-      }
-    ]);
-
-    const analytics = {
-      overview: {
-        totalUsers,
-        totalTrucks,
-        totalBranches,
-        activeBookings,
-        completedBookings: completedBookings,
-        totalRevenue: totalRevenue[0]?.total || 0,
-        period: `${period} days`
-      },
-      truckStatus: truckStatusData.reduce((acc, item) => {
-        acc[item._id] = item.count;
-        return acc;
-      }, {}),
-      bookingTrends: bookingTrends.map(item => ({
-        date: item._id.date,
-        bookings: item.bookings,
-        revenue: item.revenue
-      })),
-      serviceTypes: serviceTypeData,
-      branchPerformance,
-      fleetUtilization: fleetUtilization[0] || {
-        total: 0,
-        available: 0,
-        dispatched: 0,
-        maintenance: 0
-      },
-      ratings: ratingStats[0] || {
-        avgCustomerRating: 0,
-        avgDriverRating: 0,
-        totalRatings: 0
-      }
-    };
-
-    res.json({
-      success: true,
-      data: analytics
-    });
-
-  } catch (error) {
-    console.error('Get analytics error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error retrieving analytics'
-    });
-  }
-});
-
-// @route   GET /api/v1/analytics/fleet
-// @desc    Get fleet analytics
-// @access  Admin only
-router.get('/fleet', requireAdmin, async (req, res) => {
-  try {
-    // Fleet overview
-    const fleetOverview = await Truck.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalTrucks: { $sum: 1 },
-          activeTrucks: {
-            $sum: { $cond: [{ $eq: ['$isActive', true] }, 1, 0] }
-          },
-          avgAge: {
-            $avg: {
-              $subtract: [new Date().getFullYear(), '$vehicle.year']
-            }
-          }
-        }
-      }
-    ]);
-
-    // Truck utilization by status
-    const utilizationData = await Truck.aggregate([
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 },
-          percentage: {
-            $multiply: [
-              { $divide: [{ $sum: 1 }, { $sum: 1 }] },
-              100
-            ]
-          }
-        }
-      }
-    ]);
-
-    // Maintenance statistics
-    const maintenanceStats = await Truck.aggregate([
-      {
-        $group: {
-          _id: null,
-          needsMaintenance: {
-            $sum: {
-              $cond: [
-                {
-                  $or: [
-                    { $eq: ['$status', 'maintenance'] },
-                    {
-                      $lt: [
-                        '$maintenance.nextService',
-                        new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-                      ]
-                    }
-                  ]
-                },
-                1,
-                0
-              ]
-            }
-          },
-          avgMileage: { $avg: '$maintenance.mileage' }
-        }
-      }
-    ]);
-
-    // Performance by truck
-    const truckPerformance = await Booking.aggregate([
-      {
-        $match: {
-          truck: { $exists: true },
-          status: 'completed'
-        }
-      },
-      {
-        $group: {
-          _id: '$truck',
-          totalBookings: { $sum: 1 },
-          totalRevenue: { $sum: '$pricing.totalAmount' },
-          avgRating: { $avg: '$rating.customerRating.score' }
-        }
-      },
-      {
-        $lookup: {
-          from: 'trucks',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'truck'
-        }
-      },
-      {
-        $unwind: '$truck'
-      },
-      {
-        $project: {
-          truckId: '$truck.truckId',
-          licensePlate: '$truck.vehicle.licensePlate',
-          driver: '$truck.driver.name',
-          totalBookings: 1,
-          totalRevenue: 1,
-          avgRating: 1
-        }
-      },
-      { $sort: { totalRevenue: -1 } },
-      { $limit: 10 }
-    ]);
+    const totalTrucks = truckUtilization.reduce((sum, truck) => sum + truck.count, 0);
+    const activeTrucks = truckUtilization.find(t => t._id === 'available')?.count || 0;
+    const truckUtilizationRate = totalTrucks > 0 ? (activeTrucks / totalTrucks) * 100 : 0;
 
     res.json({
       success: true,
       data: {
-        overview: fleetOverview[0] || {},
-        utilization: utilizationData,
-        maintenance: maintenanceStats[0] || {},
-        topPerformers: truckPerformance
+        period,
+        overview: {
+          totalServices,
+          completedServices,
+          completionRate: Math.round(completionRate),
+          totalRevenue: totalRevenue[0]?.total || 0,
+          activeCustomers: activeCustomers[0]?.activeCustomers || 0,
+          averageCompletionTime: avgCompletionHours,
+          customerSatisfaction: customerSatisfaction[0]?.avgRating || 0,
+          totalRatings: customerSatisfaction[0]?.totalRatings || 0,
+          pendingPickups,
+          completedPickups,
+          truckUtilizationRate: Math.round(truckUtilizationRate),
+          customerRetentionRate: Math.round(customerRetention[0]?.retentionRate || 0)
+        },
+        breakdown: {
+          servicesByStatus: servicesByStatus.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+          }, {}),
+          servicesByType,
+          servicesByPriority: servicesByPriority.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+          }, {}),
+          truckUtilization: truckUtilization.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+          }, {})
+        },
+        trends: {
+          dailyServices: dailyServiceTrends,
+          topServices,
+          branchPerformance,
+          technicianPerformance
+        },
+        insights: {
+          customerRetention: customerRetention[0] || {},
+          recommendations: generateRecommendations({
+            completionRate,
+            customerSatisfaction: customerSatisfaction[0]?.avgRating || 0,
+            truckUtilizationRate,
+            totalServices
+          })
+        }
       }
     });
 
   } catch (error) {
-    console.error('Get fleet analytics error:', error);
+    console.error('Dashboard analytics error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error retrieving fleet analytics'
+      message: 'Error retrieving dashboard analytics'
     });
   }
 });
 
 // @route   GET /api/v1/analytics/revenue
 // @desc    Get revenue analytics
-// @access  Admin only
-router.get('/revenue', requireAdmin, async (req, res) => {
+// @access  Private (Admin/Manager)
+router.get('/revenue', requireRole(['admin', 'manager']), async (req, res) => {
   try {
-    const { period = '30', groupBy = 'day' } = req.query;
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(period));
-
-    let groupFormat;
-    switch (groupBy) {
-      case 'hour':
-        groupFormat = '%Y-%m-%d %H:00';
+    const { period = '30d', branchId, groupBy = 'day' } = req.query;
+    
+    const now = new Date();
+    let startDate;
+    
+    switch (period) {
+      case '7d':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         break;
-      case 'day':
-        groupFormat = '%Y-%m-%d';
+      case '30d':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
         break;
-      case 'week':
-        groupFormat = '%Y-W%U';
+      case '90d':
+        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
         break;
-      case 'month':
-        groupFormat = '%Y-%m';
+      case '1y':
+        startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
         break;
       default:
-        groupFormat = '%Y-%m-%d';
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     }
 
-    // Revenue trends
-    const revenueTrends = await Booking.aggregate([
-      {
-        $match: {
-          status: 'completed',
-          createdAt: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: {
-            period: { $dateToString: { format: groupFormat, date: '$createdAt' } }
-          },
-          revenue: { $sum: '$pricing.totalAmount' },
-          bookings: { $sum: 1 },
-          avgBookingValue: { $avg: '$pricing.totalAmount' }
-        }
-      },
-      { $sort: { '_id.period': 1 } }
+    const filter = { 
+      createdAt: { $gte: startDate },
+      status: 'completed'
+    };
+    
+    if (branchId) filter.branch = branchId;
+
+    // Group by format
+    let dateFormat;
+    switch (groupBy) {
+      case 'hour':
+        dateFormat = '%Y-%m-%d %H:00';
+        break;
+      case 'day':
+        dateFormat = '%Y-%m-%d';
+        break;
+      case 'week':
+        dateFormat = '%Y-%U';
+        break;
+      case 'month':
+        dateFormat = '%Y-%m';
+        break;
+      default:
+        dateFormat = '%Y-%m-%d';
+    }
+
+    const [
+      totalRevenue,
+      revenueByPeriod,
+      revenueByService,
+      revenueByBranch,
+      revenueGrowth
+    ] = await Promise.all([
+      // Total revenue
+      Service.aggregate([
+        { $match: filter },
+        { $group: { _id: null, total: { $sum: '$totalCost' } } }
+      ]),
+      
+      // Revenue by time period
+      Service.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: dateFormat,
+                date: '$createdAt'
+              }
+            },
+            revenue: { $sum: '$totalCost' },
+            services: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id': 1 } }
+      ]),
+      
+      // Revenue by service type
+      Service.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: '$serviceType',
+            revenue: { $sum: '$totalCost' },
+            services: { $sum: 1 },
+            avgRevenue: { $avg: '$totalCost' }
+          }
+        },
+        { $sort: { revenue: -1 } }
+      ]),
+      
+      // Revenue by branch
+      !branchId ? Service.aggregate([
+        { $match: filter },
+        {
+          $lookup: {
+            from: 'branches',
+            localField: 'branch',
+            foreignField: '_id',
+            as: 'branchInfo'
+          }
+        },
+        { $unwind: { path: '$branchInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $group: {
+            _id: '$branch',
+            branchName: { $first: '$branchInfo.name' },
+            revenue: { $sum: '$totalCost' },
+            services: { $sum: 1 }
+          }
+        },
+        { $sort: { revenue: -1 } }
+      ]) : Promise.resolve([]),
+      
+      // Revenue growth calculation
+      Service.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m',
+                date: '$createdAt'
+              }
+            },
+            revenue: { $sum: '$totalCost' }
+          }
+        },
+        { $sort: { '_id': 1 } }
+      ])
     ]);
 
-    // Revenue by service type
-    const revenueByService = await Booking.aggregate([
-      {
-        $match: {
-          status: 'completed',
-          createdAt: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: '$serviceType',
-          revenue: { $sum: '$pricing.totalAmount' },
-          bookings: { $sum: 1 },
-          avgValue: { $avg: '$pricing.totalAmount' }
-        }
-      },
-      { $sort: { revenue: -1 } }
-    ]);
-
-    // Total revenue summary
-    const totalRevenue = await Booking.aggregate([
-      {
-        $match: {
-          status: 'completed',
-          createdAt: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalRevenue: { $sum: '$pricing.totalAmount' },
-          totalBookings: { $sum: 1 },
-          avgBookingValue: { $avg: '$pricing.totalAmount' }
-        }
-      }
-    ]);
+    // Calculate growth rate
+    const growthRate = calculateGrowthRate(revenueGrowth);
 
     res.json({
       success: true,
       data: {
-        summary: totalRevenue[0] || {
-          totalRevenue: 0,
-          totalBookings: 0,
-          avgBookingValue: 0
-        },
-        trends: revenueTrends.map(item => ({
-          period: item._id.period,
-          revenue: item.revenue,
-          bookings: item.bookings,
-          avgBookingValue: item.avgBookingValue
-        })),
-        byServiceType: revenueByService,
-        period: `${period} days`,
-        groupBy
+        period,
+        groupBy,
+        total: totalRevenue[0]?.total || 0,
+        growthRate,
+        trends: revenueByPeriod,
+        breakdown: {
+          byService: revenueByService,
+          byBranch: revenueByBranch
+        }
       }
     });
 
   } catch (error) {
-    console.error('Get revenue analytics error:', error);
+    console.error('Revenue analytics error:', error);
     res.status(500).json({
       success: false,
       message: 'Error retrieving revenue analytics'
     });
   }
 });
+
+// @route   GET /api/v1/analytics/performance
+// @desc    Get performance analytics
+// @access  Private (Admin/Manager)
+router.get('/performance', requireRole(['admin', 'manager']), async (req, res) => {
+  try {
+    const { period = '30d', branchId } = req.query;
+    
+    const now = new Date();
+    let startDate;
+    
+    switch (period) {
+      case '7d':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30d':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case '90d':
+        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+
+    const filter = { createdAt: { $gte: startDate } };
+    if (branchId) filter.branch = branchId;
+
+    const [
+      serviceMetrics,
+      technicianPerformance,
+      branchPerformance,
+      customerMetrics,
+      qualityMetrics
+    ] = await Promise.all([
+      // Service performance metrics
+      Service.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: null,
+            totalServices: { $sum: 1 },
+            completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+            cancelled: { $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] } },
+            inProgress: { $sum: { $cond: [{ $eq: ['$status', 'in_progress'] }, 1, 0] } },
+            avgCompletionTime: { $avg: '$schedule.actualDuration' },
+            avgCost: { $avg: '$totalCost' }
+          }
+        }
+      ]),
+      
+      // Technician performance
+      Service.aggregate([
+        { $match: { ...filter, assignedTechnician: { $exists: true } } },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'assignedTechnician',
+            foreignField: '_id',
+            as: 'techInfo'
+          }
+        },
+        { $unwind: '$techInfo' },
+        {
+          $group: {
+            _id: '$assignedTechnician',
+            name: { $first: '$techInfo.name' },
+            email: { $first: '$techInfo.email' },
+            totalServices: { $sum: 1 },
+            completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+            avgRating: { $avg: '$feedback.rating' },
+            totalRatings: { $sum: { $cond: [{ $ne: ['$feedback.rating', null] }, 1, 0] } },
+            avgCompletionTime: { $avg: '$schedule.actualDuration' },
+            totalRevenue: { $sum: '$totalCost' }
+          }
+        },
+        {
+          $addFields: {
+            completionRate: { $multiply: [{ $divide: ['$completed', '$totalServices'] }, 100] },
+            efficiency: {
+              $cond: [
+                { $gt: ['$avgCompletionTime', 0] },
+                { $divide: ['$totalServices', '$avgCompletionTime'] },
+                0
+              ]
+            }
+          }
+        },
+        { $sort: { totalServices: -1 } }
+      ]),
+      
+      // Branch performance
+      !branchId ? Service.aggregate([
+        { $match: filter },
+        {
+          $lookup: {
+            from: 'branches',
+            localField: 'branch',
+            foreignField: '_id',
+            as: 'branchInfo'
+          }
+        },
+        { $unwind: { path: '$branchInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $group: {
+            _id: '$branch',
+            name: { $first: '$branchInfo.name' },
+            code: { $first: '$branchInfo.code' },
+            totalServices: { $sum: 1 },
+            completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+            avgRating: { $avg: '$feedback.rating' },
+            totalRevenue: { $sum: '$totalCost' },
+            avgCompletionTime: { $avg: '$schedule.actualDuration' }
+          }
+        },
+        {
+          $addFields: {
+            completionRate: { $multiply: [{ $divide: ['$completed', '$totalServices'] }, 100] }
+          }
+        },
+        { $sort: { totalServices: -1 } }
+      ]) : Promise.resolve([]),
+      
+      // Customer metrics
+      Service.aggregate([
+        { $match: filter },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'customer',
+            foreignField: '_id',
+            as: 'customerInfo'
+          }
+        },
+        { $unwind: '$customerInfo' },
+        {
+          $group: {
+            _id: '$customer',
+            name: { $first: '$customerInfo.name' },
+            email: { $first: '$customerInfo.email' },
+            totalServices: { $sum: 1 },
+            totalSpent: { $sum: '$totalCost' },
+            avgRating: { $avg: '$feedback.rating' },
+            lastService: { $max: '$createdAt' },
+            firstService: { $min: '$createdAt' }
+          }
+        },
+        {
+          $addFields: {
+            avgSpending: { $divide: ['$totalSpent', '$totalServices'] },
+            daysSinceLastService: {
+              $divide: [
+                { $subtract: [new Date(), '$lastService'] },
+                1000 * 60 * 60 * 24
+              ]
+            }
+          }
+        },
+        { $sort: { totalSpent: -1 } },
+        { $limit: 20 }
+      ]),
+      
+      // Quality metrics
+      Service.aggregate([
+        { $match: { ...filter, 'feedback.rating': { $exists: true } } },
+        {
+          $group: {
+            _id: '$serviceType',
+            avgRating: { $avg: '$feedback.rating' },
+            totalRatings: { $sum: 1 },
+            ratings: { $push: '$feedback.rating' }
+          }
+        },
+        {
+          $addFields: {
+            satisfaction: {
+              $multiply: [
+                { $divide: [{ $size: { $filter: { input: '$ratings', cond: { $gte: ['$$this', 4] } } } }, '$totalRatings'] },
+                100
+              ]
+            }
+          }
+        },
+        { $sort: { avgRating: -1 } }
+      ])
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        period,
+        serviceMetrics: serviceMetrics[0] || {},
+        technicianPerformance,
+        branchPerformance,
+        topCustomers: customerMetrics,
+        qualityMetrics
+      }
+    });
+
+  } catch (error) {
+    console.error('Performance analytics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error retrieving performance analytics'
+    });
+  }
+});
+
+// Helper function to generate recommendations
+function generateRecommendations(metrics) {
+  const recommendations = [];
+  
+  if (metrics.completionRate < 80) {
+    recommendations.push({
+      type: 'warning',
+      title: 'Low Completion Rate',
+      message: 'Service completion rate is below 80%. Consider reviewing workflow and resource allocation.',
+      priority: 'high'
+    });
+  }
+  
+  if (metrics.customerSatisfaction < 4.0) {
+    recommendations.push({
+      type: 'warning',
+      title: 'Customer Satisfaction',
+      message: 'Customer satisfaction is below 4.0. Focus on service quality improvements.',
+      priority: 'high'
+    });
+  }
+  
+  if (metrics.truckUtilizationRate < 60) {
+    recommendations.push({
+      type: 'info',
+      title: 'Truck Utilization',
+      message: 'Truck utilization is low. Consider optimizing routes or reassigning vehicles.',
+      priority: 'medium'
+    });
+  }
+  
+  if (metrics.totalServices > 100 && metrics.completionRate > 90) {
+    recommendations.push({
+      type: 'success',
+      title: 'Excellent Performance',
+      message: 'Great job! High service volume with excellent completion rate.',
+      priority: 'low'
+    });
+  }
+  
+  return recommendations;
+}
+
+// Helper function to calculate growth rate
+function calculateGrowthRate(revenueData) {
+  if (revenueData.length < 2) return 0;
+  
+  const current = revenueData[revenueData.length - 1]?.revenue || 0;
+  const previous = revenueData[revenueData.length - 2]?.revenue || 0;
+  
+  if (previous === 0) return 0;
+  
+  return Math.round(((current - previous) / previous) * 100);
+}
 
 export default router;

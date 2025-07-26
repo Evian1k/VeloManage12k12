@@ -1,0 +1,11 @@
+## Pages
+- [Admin Dashboard - AutoCare Pro](/admindashboard): Administrative dashboard for managing service requests, approvals, and system oversight.
+- [AutoCare Pro - Premium Car Management System](/landing): Professional car management and service system with real-time tracking, automated reminders, and comprehensive admin controls.
+- [Dashboard - AutoCare Pro](/userdashboard): Manage your vehicle services, track requests, and stay updated with your AutoCare Pro dashboard.
+- [My Vehicles - AutoCare Pro](/myvehicles): Manage your vehicles in the AutoCare Pro system.
+- [Request Service - AutoCare Pro](/servicerequest): Request professional car services including brake repair, routine maintenance, and vehicle pickup with real-time tracking.
+- [Service History - AutoCare Pro](/servicehistory): View your completed service history with AutoCare Pro.
+- [Settings - AutoCare Pro](/settings): Manage your account settings and profile information.
+- [Sign In - AutoCare Pro](/login): Sign in to your AutoCare Pro account to manage your vehicle services and track requests.
+- [Sign Up - AutoCare Pro](/register): Create your AutoCare Pro account to start managing your vehicle services with professional care.
+- [Track Vehicle Pickup - AutoCare Pro](/tracking): Real-time GPS tracking for your vehicle pickup service with live location updates and estimated arrival time.

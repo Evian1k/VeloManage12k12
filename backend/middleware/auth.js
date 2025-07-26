@@ -120,6 +120,28 @@ export const requireOwnershipOrAdmin = (req, res, next) => {
   next();
 };
 
+// Middleware to check if user has specific role(s)
+export const requireRole = (allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required.'
+      });
+    }
+
+    // Check if user's role is in the allowed roles array
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Required role(s): ${allowedRoles.join(', ')}`
+      });
+    }
+
+    next();
+  };
+};
+
 // Optional authentication middleware (doesn't fail if no token)
 export const optionalAuth = async (req, res, next) => {
   try {
