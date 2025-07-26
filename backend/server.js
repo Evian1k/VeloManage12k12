@@ -26,6 +26,11 @@ import { errorHandler } from './middleware/errorHandler.js';
 // Load environment variables
 dotenv.config();
 
+// Validate critical environment variables
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your-super-secret-jwt-key-change-in-production') {
+  console.warn('⚠️  Warning: Using default JWT_SECRET. Please set a secure JWT_SECRET in your .env file.');
+}
+
 const app = express();
 const server = createServer(app);
 
